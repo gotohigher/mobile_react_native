@@ -1,0 +1,40 @@
+[
+  {
+    "inputs": [],
+    "name": "getResult",
+    "outputs": [
+      {"internalType": "bool", "name": "", "type": "bool"},
+      {"internalType": "bool", "name": "", "type": "bool"}
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "matchHashes",
+    "outputs": [{"internalType": "bool", "name": "", "type": "bool"}],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "string", "name": "_hash1", "type": "string"}],
+    "name": "storeHash1",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "string", "name": "_hash2", "type": "string"}],
+    "name": "storeHash2",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{"internalType": "string", "name": "_hash3", "type": "string"}],
+    "name": "storeHash3",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  }
+]
