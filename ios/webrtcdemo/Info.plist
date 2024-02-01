@@ -24,10 +24,16 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSExceptionDomains</key>
 		<dict>
+			<key>New item</key>
+			<string></string>
 			<key>localhost</key>
 			<dict>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
@@ -37,14 +43,20 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Allow</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Allow GPS permission</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string>GPS permission</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Allow</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Allow</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Allow</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiredDeviceCapabilities</key>

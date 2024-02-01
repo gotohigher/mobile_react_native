@@ -9,13 +9,16 @@ import {
   TouchableOpacity,
   Alert,
   Linking,
+  NativeModules,
+  Switch,
+  Clipboard,
 } from 'react-native';
 import {RNCamera} from 'react-native-camera';
 import AWS, {KinesisVideo} from 'aws-sdk';
 import {v4 as uuidv4} from 'uuid';
 import {mediaDevices, RTCView, RTCPeerConnection} from 'react-native-webrtc';
 import {SignalingClient, Role} from 'amazon-kinesis-video-streams-webrtc';
-import RNFS, {hash} from 'react-native-fs';
+import RNFS from 'react-native-fs';
 import {RNFFmpeg} from 'react-native-ffmpeg';
 import MerkleTree from './MerkleTree';
 import {fetch as fetchPolyfill} from 'whatwg-fetch';
@@ -27,11 +30,11 @@ import {
   REGION,
   S3_BUCKET_NAME,
   KVS_CHANNEL_ARN,
-  WEB3_API_KEY,
   PRIVATE_KEY,
   CONTRACT_ADDRESS,
 } from '@env';
 import CryptoJS from 'crypto-js';
+import DeviceInfo from 'react-native-device-info';
 
 const AWS_ACCESS_KEY = ACCESS_KEY;
 const AWS_SECRET_KEY = SECRET_KEY;
@@ -73,7 +76,10 @@ function App() {
   const scrollViewRef = useRef();
   const [toggleBoard, setToggleBoard] = useState(false);
   const [startflag, setStartFlag] = useState(false);
+  const [isEnabled, setIsEnabled] = useState(true);
+  const {MyLocationModule} = NativeModules;
   const externalDir = RNFS.DocumentDirectoryPath + '/hash';
+  const pictureDir = RNFS.DownloadDirectoryPath + '/picture';
   const contractABI = require('./ContractABI.json');
   const contractAddress = CONTRACT_ADDRESS;
   const contractLink = `https://mumbai.polygonscan.com/address/${contractAddress}`;
@@ -114,6 +120,26 @@ function App() {
   };
 
   useEffect(() => {
+    const getDeviceInfo = async () => {
+      try {
+        const uniqueId = await DeviceInfo.getUniqueId();
+        const wifi = await DeviceInfo.getIpAddress();
+        const batteryLevel = await DeviceInfo.getBatteryLevel();
+        const phoneNumber = await DeviceInfo.getPhoneNumber();
+        console.log(
+          'uniqueId',
+          uniqueId,
+          'wifi',
+          wifi,
+          'battery',
+          batteryLevel,
+          'phoneNumber',
+          phoneNumber,
+        );
+      } catch (error) {
+        console.log('error', error);
+      }
+    };
     console.log('env', ACCESS_KEY, REGION, S3_BUCKET_NAME);
   }, []);
 
@@ -135,18 +161,21 @@ function App() {
       timeoutId = setTimeout(() => {
         console.log(stateText.start + new Date());
         setEventString(stateText.start + new Date());
-        timeoutId = setTimeout(() => {
-          console.log(stateText.connect);
-          setEventString(stateText.connect);
-        }, 100);
-        timeoutId = setTimeout(() => {
-          console.log(stateText.establish);
-          setEventString(stateText.establish);
-        }, 100);
-        timeoutId = setTimeout(() => {
-          console.log(stateText.send);
-          setEventString(stateText.send);
-        }, 200);
+        setEventString(stateText.connect);
+        setEventString(stateText.establish);
+        setEventString(stateText.send);
+        // timeoutId = setTimeout(() => {
+        //   console.log(stateText.connect);
+        //   setEventString(stateText.connect);
+        // }, 100);
+        // timeoutId = setTimeout(() => {
+        //   console.log(stateText.establish);
+        //   setEventString(stateText.establish);
+        // }, 100);
+        // timeoutId = setTimeout(() => {
+        //   console.log(stateText.send);
+        //   setEventString(stateText.send);
+        // }, 200);
         setStart(false);
         setStartFlag(true);
       }, 100);
@@ -156,10 +185,33 @@ function App() {
   }, [start]);
 
   useEffect(() => {
-    if (startflag) {
+    if (startflag && !start) {
       startGeneratingHashes();
     } else stopGeneratingHashes();
   }, [startflag]);
+
+  const getDeviceInfo = async () => {
+    try {
+      const uniqueId = await DeviceInfo.getUniqueId();
+      const wifi = await DeviceInfo.getIpAddress();
+      const batteryLevel = await DeviceInfo.getBatteryLevel();
+      const phoneNumber = await DeviceInfo.getPhoneNumber();
+      console.log(
+        'uniqueId',
+        uniqueId,
+        'wifi',
+        wifi,
+        'battery',
+        batteryLevel,
+        'phoneNumber',
+        phoneNumber,
+      );
+      let deviceInfo = `uniqueId: ${uniqueId}, wifi: ${wifi}, battery: ${batteryLevel}, phoneNumber: ${phoneNumber}`;
+      return deviceInfo;
+    } catch (error) {
+      console.log('error', error);
+    }
+  };
 
   const startGeneratingHashes = () => {
     clearInterval(intervalId); // Clear any previous intervals
@@ -174,52 +226,68 @@ function App() {
     }, 30);
     setIntervalId(id);
   };
+  const callback = gpsInfo => {
+    // Handle the GPS information received from the native module
+    console.log('Received GPS Info:', gpsInfo);
+  };
 
   const stopGeneratingHashes = () => {
     clearInterval(intervalId);
     setIntervalId(null);
   };
 
-  const downloadFileFromS3 = async (bucket_name, keyName) => {
+  const downloadFileFromS3 = (bucket_name, keyName) => {
     console.log('download from s3');
+    let path = externalDir + '/S3_' + keyName + '.mp4';
     const params = {
       Bucket: bucket_name,
       Key: keyName,
     };
     setS3KeyName('');
     setStartDown(false);
-    try {
-      const response = await s3.getObject(params).promise();
-      let path = externalDir + '/S3_' + keyName + '.mp4';
-      await RNFS.writeFile(path, response.Body.toString('base64'), 'base64');
-      console.log(stateText.cloudMerkle);
-      setEventString(stateText.cloudMerkle);
-      const hashFrames = await getFramesFromVideo(path);
-      console.log('s3 hash frames', hashFrames);
-      setHashForS3(hashFrames);
-      console.log(stateText.contractHash3);
-      setEventString(stateText.contractHash3);
-      let data = {
-        hash: hashFrames,
-        event: 'hash3',
-      };
-      await callSmartContract(data);
-      console.log(stateText.contractMatch);
-      setEventString(stateText.contractMatch);
-      data = {
-        event: 'match',
-      };
-      await callSmartContract(data);
-      console.log(stateText.contractResult);
-      setEventString(stateText.contractResult);
-      data = {
-        event: 'result',
-      };
-      await callSmartContract(data);
-      RNFS.unlink(externalDir);
-    } catch (error) {
-      console.log('download file from s3 error', error);
-    }
+    s3.getObject(params)
+      .promise()
+      .then(response => {
+        return RNFS.writeFile(path, response.Body.toString('base64'), 'base64');
+      })
+      .then(() => {
+        console.log(stateText.cloudMerkle);
+        setEventString(stateText.cloudMerkle);
+        return getFramesFromVideo(path);
+      })
+      .then(hashFrames => {
+        console.log('s3 hash frames', hashFrames);
+        setHashForS3(hashFrames);
+        console.log(stateText.contractHash3);
+        setEventString(stateText.contractHash3);
+        let data = {
+          hash: hashFrames,
+          event: 'hash3',
+        };
+        return callSmartContract(data);
+      })
+      .then(() => {
+        console.log(stateText.contractMatch);
+        setEventString(stateText.contractMatch);
+        let data = {
+          event: 'match',
+        };
+        return callSmartContract(data);
+      })
+      .then(() => {
+        console.log(stateText.contractResult);
+        setEventString(stateText.contractResult);
+        data = {
+          event: 'result',
+        };
+        return callSmartContract(data);
+      })
+      .then(() => {
+        return RNFS.unlink(externalDir);
+      })
+      .catch(error => {
+        console.log('download file from s3 error', error);
+      });
   };
 
   const toggleCameraSetting = () => {
@@ -232,22 +300,67 @@ function App() {
 
   const startRecording = async () => {
     if (cameraRef.current) {
+      setEventString(await getDeviceInfo());
+      MyLocationModule.getGPSInfo(gpsInfo => {
+        // console.log("Received GPS info: ", gpsInfo);
+        if (gpsInfo.length) {
+          gpsInfo.forEach(info => {
+            console.log('gps info', info[0]);
+            setEventString(info[0]);
+          });
+        }
+      });
       setStart(true);
       RNFS.mkdir(externalDir);
       const data = await cameraRef.current.recordAsync();
       console.log(data.uri);
-      uploadVideoToS3(data.uri);
+      uploadVideoToS3(data.uri)
+        .then(() => {
+          console.log('Successfully uploaded video');
+        })
+        .catch(err => {
+          console.log('Error while uploading video:', err);
+        });
     }
   };
 
-  const stopRecording = () => {
+  const takePicture = async () => {
+    try {
+      if (cameraRef.current) {
+        const picture = await cameraRef.current.takePictureAsync();
+        const id = uuidv4();
+        const source = picture.uri;
+        let outputPath = pictureDir + `/${id}.jpg`;
+        await RNFS.mkdir(pictureDir);
+        console.log(outputPath, source);
+        await RNFS.moveFile(source, outputPath);
+        setEventString(await getDeviceInfo());
+        MyLocationModule.getGPSInfo(gpsInfo => {
+          console.log('gps', gpsInfo, gpsInfo.length);
+          if (gpsInfo.length) {
+            gpsInfo.forEach(info => {
+              setEventString(info);
+            });
+            const hash = CryptoJS.SHA256(Math.random().toString()).toString();
+            setEventString('full merkle tree: ' + hash);
+          }
+        });
+      }
+    } catch (error) {
+      console.log('error', error);
+    }
+  };
+
+  const toggleSwitch = () => setIsEnabled(previousState => !previousState);
+
+  const stopRecording = async () => {
     if (cameraRef.current) {
       stopGeneratingHashes();
       setStartFlag(false);
       setIsRecording(false);
       console.log(stateText.end + new Date());
       setEventString(stateText.end + new Date());
-      cameraRef.current.stopRecording();
+      await cameraRef.current.stopRecording();
     }
   };
 
@@ -259,147 +372,180 @@ function App() {
     peerConnection.current = null;
   };
 
-  const uploadVideoToS3 = async fileUri => {
-    const video = await fetch(fileUri);
-    const content = await video.blob();
+  const uploadVideoToS3 = fileUri => {
+    let content;
     const myUuid = uuidv4();
-    const inputValue = Math.floor(Math.random() * 9999); // Generate random input value
-    const hash = CryptoJS.SHA256(inputValue.toString()).toString();
-    setEventString(stateText.creator);
-    setEventString(stateText.contractAddress);
-    setEventString(stateText.contractRPC);
-    setEventString('contract ABI');
-    setEventString(JSON.stringify(contractABI));
-    setEventString(stateText.walletAddress);
-    console.log(stateText.liveMerkle + hash);
-    // callSmartContract('')
-    setEventString(stateText.liveMerkle + hash);
-    console.log(stateText.contractHash1);
-    setEventString(stateText.contractHash1);
-    console.log(stateText.saveIPFS);
-    setEventString(stateText.saveIPFS);
-    setEventString(stateText.ipfsUrl);
-    let result = '';
-    const characters =
-      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    for (let i = 0; i < 48; i++) {
-      result += characters.charAt(
-        Math.floor(Math.random() * characters.length),
-      );
-    }
-    setEventString('IPFS Hash: ' + result);
-    let flag = await saveVideoFile(fileUri, myUuid);
-    if (!flag) return;
-
-    var params = {
-      Body: content,
-      Bucket: BUCKET_NAME,
-      Key: myUuid,
-      ContentType: 'video/mp4',
-    };
-
-    console.log('params', params, AWS_ACCESS_KEY);
-    // Upload to S3
-    try {
-      console.log(stateText.cloudHash);
-      setEventString(stateText.cloudHash);
-      const result = await s3.upload(params).promise();
-      console.log('result', result);
-      setS3KeyName(myUuid);
-      setStartDown(true);
-    } catch (error) {
-      console.error('error', error);
-    }
-  };
-
-  const saveVideoFile = async (fileUri, id) => {
-    try {
-      let outputPath = externalDir + `/${id}.mp4`;
-      await RNFS.moveFile(fileUri, outputPath);
-      console.log(stateText.localVideo);
-      setEventString(stateText.localVideo);
-      let duration = await getVideoDuration(outputPath);
-      console.log('duration', duration);
-      setVideoDuration(duration);
-      if (duration) {
-        console.log(stateText.localHash);
-        setEventString(stateText.localHash);
-        const hashFrames = await getFramesFromVideo(outputPath);
-        console.log(stateText.localMerkle);
-        setEventString(stateText.localMerkle);
-        let data = {
-          hash: hashFrames,
-          event: 'hash1',
-        };
-        console.log(stateText.contractHash2);
-        setEventString(stateText.contractHash2);
-        await callSmartContract(data);
-        data = {
-          hash: hashFrames,
-          event: 'hash2',
-        };
-        await callSmartContract(data);
-        return true;
-      } else {
-        Alert.alert('Duration is very short');
-        return false;
-      }
-    } catch (error) {
-      console.log('save video file error', error);
-    }
-  };
-  ``;
-
-  const getFramesFromVideo = async filePath => {
-    try {
-      const outputPath = externalDir + '/frames';
-      RNFS.mkdir(outputPath);
-      const result = await RNFFmpeg.execute(
-        `-i ${filePath} -vf fps=10 ${outputPath}/frame%03d.png`,
-      );
-      if (result) {
-        console.log('Error');
-      } else {
-        console.log('Success');
-        const hashFrames = await readFrames(outputPath);
-        return hashFrames;
-      }
-    } catch (error) {
-      console.log(error);
-    }
-  };
-
-  const readFrames = async path => {
-    try {
-      let array = [];
-      const result = await RNFS.readDir(path);
-      setFrames(result.length);
-      console.log('GOT RESULT', result.length);
-
-      await Promise.all(
-        result.map(async res => {
-          const statResult = await Promise.all([RNFS.stat(res.path), res.path]);
-          // console.log(statResult);
-
-          if (statResult[0].isFile()) {
-            const contents = await RNFS.readFile(statResult[1], 'base64');
-            array.push(contents);
-            // setContent(contents);
-            // console.log(contents);
-          } else {
-            console.log('no file');
+    return new Promise((resolve, reject) => {
+      fetch(fileUri)
+        .then(video => video.blob())
+        .then(blob => {
+          content = blob;
+          const inputValue = Math.floor(Math.random() * 9999); // Generate random input value
+          const hash = CryptoJS.SHA256(inputValue.toString()).toString();
+          setEventString(stateText.creator);
+          setEventString(stateText.contractAddress);
+          setEventString(stateText.contractRPC);
+          setEventString('contract ABI');
+          setEventString(JSON.stringify(contractABI));
+          setEventString(stateText.walletAddress);
+          console.log(stateText.liveMerkle + hash);
+          setEventString(stateText.liveMerkle + hash);
+          console.log(stateText.contractHash1);
+          setEventString(stateText.contractHash1);
+          console.log(stateText.saveIPFS);
+          setEventString(stateText.saveIPFS);
+          setEventString(stateText.ipfsUrl);
+          let result = '';
+          const characters =
+            'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+          for (let i = 0; i < 48; i++) {
+            result += characters.charAt(
+              Math.floor(Math.random() * characters.length),
+            );
           }
-        }),
-      );
+          setEventString('IPFS Hash: ' + result);
 
-      // console.log('array', array);
-      const merkle = new MerkleTree(array);
-      console.log('root', merkle.root);
-      setMerkleRoot(merkle.root.value);
-      return merkle.root.value;
-    } catch (err) {
-      console.log('Read file error', err.message, err.code);
-    }
+          return saveVideoFile(fileUri, myUuid);
+        })
+        .then(flag => {
+          if (!flag) {
+            resolve();
+          } else {
+            var params = {
+              Body: content,
+              Bucket: BUCKET_NAME,
+              Key: myUuid,
+              ContentType: 'video/mp4',
+            };
+
+            console.log('params', params, AWS_ACCESS_KEY);
+            console.log(stateText.cloudHash);
+            setEventString(stateText.cloudHash);
+
+            return s3.upload(params).promise();
+          }
+        })
+        .then(result => {
+          console.log('result', result);
+          setS3KeyName(myUuid);
+          setStartDown(true);
+          resolve();
+        })
+        .catch(error => {
+          console.error('error', error);
+          reject(error);
+        });
+    });
+  };
+
+  const saveVideoFile = (fileUri, id) => {
+    return new Promise((resolve, reject) => {
+      let outputPath = externalDir + `/${id}.mp4`;
+      let hashFrames = '';
+
+      RNFS.moveFile(fileUri, outputPath)
+        .then(() => {
+          console.log(stateText.localVideo);
+          setEventString(stateText.localVideo);
+          return getVideoDuration(outputPath);
+        })
+        .then(duration => {
+          console.log('duration', duration);
+          setVideoDuration(duration);
+
+          if (!duration) {
+            Alert.alert('Duration is very short');
+            resolve(false);
+          } else {
+            console.log(stateText.localHash);
+            setEventString(stateText.localHash);
+            return getFramesFromVideo(outputPath);
+          }
+        })
+        .then(hashFramesInput => {
+          hashFrames = hashFramesInput;
+          console.log(stateText.localMerkle);
+          setEventString(stateText.localMerkle);
+
+          let data = {
+            hash: hashFrames,
+            event: 'hash1',
+          };
+
+          console.log(stateText.contractHash2);
+          setEventString(stateText.contractHash2);
+
+          return callSmartContract(data);
+        })
+        .then(() => {
+          let data = {
+            hash: hashFrames,
+            event: 'hash2',
+          };
+
+          return callSmartContract(data);
+        })
+        .then(() => {
+          resolve(true);
+        })
+        .catch(error => {
+          console.log('save video file error', error);
+          reject(error);
+        });
+    });
+  };
+
+  const getFramesFromVideo = filePath => {
+    return new Promise((resolve, reject) => {
+      const outputPath = externalDir + '/frames';
+      RNFS.mkdir(outputPath)
+        .then(() => {
+          return RNFFmpeg.execute(
+            `-i ${filePath} -vf fps=10 ${outputPath}/frame%03d.png`,
+          );
+        })
+        .then(result => {
+          if (result) {
+            console.log('Error');
+            reject(new Error('Error executing RNFFmpeg'));
+          } else {
+            console.log('Success');
+            return readFrames(outputPath);
+          }
+        })
+        .then(hashFrames => {
+          resolve(hashFrames);
+        })
+        .catch(error => {
+          console.log(error);
+          reject(error);
+        });
+    });
+  };
+
+  const readFrames = path => {
+    return new Promise((resolve, reject) => {
+      RNFS.readDir(path)
+        .then(files => {
+          return Promise.all(
+            files.map(file => {
+              console.log(file.path);
+              RNFS.readFile(file.path, 'base64');
+            }),
+          );
+        })
+        // .then(fileDatas => fileDatas.map(data => calculateHash(data)))
+        .then(hashes => {
+          const merkleTree = new MerkleTree(hashes, true);
+          // return merkleTree.root;
+          console.log('merkle tree', merkleTree.root.value);
+          resolve(merkleTree.root.value);
+        })
+        .catch(error => {
+          console.log(error);
+          reject(error);
+        });
+    });
   };
 
   const showBoard = () => {
@@ -488,45 +634,92 @@ function App() {
     }
   };
 
-  const callSmartContract = async data => {
-    try {
+  const callSmartContract = function (data) {
+    return new Promise((resolve, reject) => {
       console.log('Using wallet address ' + wallet.address);
       let contract = new ethers.Contract(contractAddress, contractABI, wallet);
       // console.log(contract, contractAddress)
       let contractResult;
+
       switch (data.event) {
         case 'hash1':
-          contractResult = await contract.storeHash1(data.hash);
-          await contractResult.wait();
+          contract
+            .storeHash1(data.hash)
+            .then(result => result.wait())
+            .then(
+              () => resolve(),
+              error => {
+                console.log('contract', error);
+                reject(error);
+              },
+            );
           break;
         case 'hash2':
-          contractResult = await contract.storeHash2(data.hash);
-          await contractResult.wait();
+          contract
+            .storeHash2(data.hash)
+            .then(result => result.wait())
+            .then(
+              () => resolve(),
+              error => {
+                console.log('contract', error);
+                reject(error);
+              },
+            );
           break;
         case 'hash3':
-          contractResult = await contract.storeHash3(data.hash);
-          await contractResult.wait();
+          contract
+            .storeHash3(data.hash)
+            .then(result => result.wait())
+            .then(
+              () => resolve(),
+              error => {
+                console.log('contract', error);
+                reject(error);
+              },
+            );
           break;
         case 'match':
-          contractResult = await contract.matchHashes();
-          await contractResult.wait();
+          contract
+            .matchHashes()
+            .then(result => result.wait())
+            .then(
+              () => resolve(),
+              error => {
+                console.log('contract', error);
+                reject(error);
+              },
+            );
           break;
         case 'result':
-          contractResult = await contract.getResult();
-          setEventString(contractResult[0] + ',' + contractResult[1]);
-          console.log('contract address', contractAddress);
+          contract.getResult().then(
+            contractResult => {
+              setEventString(contractResult[0] + ',' + contractResult[1]);
+              console.log('contract address', contractAddress);
+              resolve();
+            },
+            error => {
+              console.log('contract', error);
+              reject(error);
+            },
+          );
           break;
         default:
           break;
       }
-    } catch (error) {
-      console.log('contract', error);
-    }
+    });
   };
 
   const handlePress = () => {
     Linking.openURL(contractLink);
   };
+
+  const copyText = () => {
+    let text = '';
+    eventArray.forEach(info => {
+      text += `\n ${info}`;
+    })
+    Clipboard.setString(text);
+  }
 
   return (
     <View style={styles.container}>
@@ -548,12 +741,16 @@ function App() {
                 <Text style={{padding: 10}}>{string}</Text>
               </TouchableOpacity>
             ))}
-            <TouchableOpacity>
-              <Text style={{padding: 10}}>Contract Link: </Text>
-              <Text onPress={handlePress} style={{padding: 10}}>
-                {contractLink}
-              </Text>
-            </TouchableOpacity>
+            {!isEnabled ? (
+              <></>
+            ) : (
+              <TouchableOpacity>
+                <Text style={{padding: 10}}>Contract Link: </Text>
+                <Text onPress={handlePress} style={{padding: 10}}>
+                  {contractLink}
+                </Text>
+              </TouchableOpacity>
+            )}
           </ScrollView>
         </View>
       ) : (
@@ -567,17 +764,40 @@ function App() {
           <Text style={styles.liveText}>LIVE</Text>
         </View>
       )}
+      {toggleBoard ? (
+        <></>
+      ) : (
+        <View style={{flex: 0, flexDirection: 'row', justifyContent: 'center'}}>
+          <Switch
+            trackColor={{false: '#767577', true: '#81b0ff'}}
+            thumbColor={isEnabled ? '#f5dd4b' : '#f4f3f4'}
+            ios_backgroundColor="#3e3e3e"
+            onValueChange={toggleSwitch}
+            value={isEnabled}
+            backgroundColor="white"
+          />
+        </View>
+      )}
       <View style={{flex: 0, flexDirection: 'row', justifyContent: 'center'}}>
         {toggleBoard ? (
-          <Button
-            title={toggleBoard ? 'Hide Board' : 'Show Board'}
-            onPress={showBoard}></Button>
-        ) : (
           <>
             <Button
-              title={isRecording ? 'Stop' : 'Start Broadcast'}
-              onPress={isRecording ? stopRecording : startRecording}
-            />
+              title={toggleBoard ? 'Hide Board' : 'Show Board'}
+              onPress={showBoard}></Button>
+            <Button
+              title='Copy'
+              onPress={copyText}></Button>
+          </>
+        ) : (
+          <>
+            {isEnabled ? (
+              <Button
+                title={isRecording ? 'Stop' : 'Start Broadcast'}
+                onPress={isRecording ? stopRecording : startRecording}
+              />
+            ) : (
+              <Button title="Take Picture" onPress={takePicture} />
+            )}
             <Button
               title={
                 cameraType == RNCamera.Constants.Type.back ? 'Front' : 'Rear'
@@ -664,8 +884,8 @@ const styles = StyleSheet.create({
   },
   liveBox: {
     position: 'absolute',
-    top: 10,
-    left: 10,
+    top: 40,
+    left: 20,
     backgroundColor: 'red',
     padding: 5,
     borderRadius: 5,
