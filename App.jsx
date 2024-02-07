@@ -35,7 +35,6 @@ import {
 } from '@env';
 import CryptoJS from 'crypto-js';
 import DeviceInfo from 'react-native-device-info';
-
 const AWS_ACCESS_KEY = ACCESS_KEY;
 const AWS_SECRET_KEY = SECRET_KEY;
 const AWS_REGION = REGION;
@@ -54,6 +53,8 @@ LogBox.ignoreAllLogs(); //Ignore all log notifications
 
 function App() {
   const cameraRef = useRef(null);
+  const frontCameraRef = useRef(null);
+  const rearCameraRef = useRef(null);
   const localStream = useRef(null);
   const peerConnection = useRef(null);
   const [isRecording, setIsRecording] = useState(false);
@@ -120,26 +121,6 @@ function App() {
   };
 
   useEffect(() => {
-    const getDeviceInfo = async () => {
-      try {
-        const uniqueId = await DeviceInfo.getUniqueId();
-        const wifi = await DeviceInfo.getIpAddress();
-        const batteryLevel = await DeviceInfo.getBatteryLevel();
-        const phoneNumber = await DeviceInfo.getPhoneNumber();
-        console.log(
-          'uniqueId',
-          uniqueId,
-          'wifi',
-          wifi,
-          'battery',
-          batteryLevel,
-          'phoneNumber',
-          phoneNumber,
-        );
-      } catch (error) {
-        console.log('error', error);
-      }
-    };
     console.log('env', ACCESS_KEY, REGION, S3_BUCKET_NAME);
   }, []);
 
@@ -148,11 +129,11 @@ function App() {
     setEventArray(newStrings);
   }, [eventString]);
 
-  useEffect(() => {
-    if (startDown) {
-      downloadFileFromS3(BUCKET_NAME, s3KeyName);
-    }
-  }, [startDown]);
+  // useEffect(() => {
+  //   if (startDown) {
+  //     downloadFileFromS3(BUCKET_NAME, s3KeyName);
+  //   }
+  // }, [startDown]);
 
   useEffect(() => {
     let timeoutId;
@@ -237,7 +218,6 @@ function App() {
   };
 
   const downloadFileFromS3 = (bucket_name, keyName) => {
-    console.log('download from s3');
     let path = externalDir + '/S3_' + keyName + '.mp4';
     const params = {
       Bucket: bucket_name,
@@ -245,21 +225,22 @@ function App() {
     };
     setS3KeyName('');
     setStartDown(false);
-    s3.getObject(params)
+    return s3
+      .getObject(params)
       .promise()
       .then(response => {
         return RNFS.writeFile(path, response.Body.toString('base64'), 'base64');
       })
       .then(() => {
         console.log(stateText.cloudMerkle);
-        setEventString(stateText.cloudMerkle);
+        setEventString(stautsString + stateText.cloudMerkle);
         return getFramesFromVideo(path);
       })
       .then(hashFrames => {
         console.log('s3 hash frames', hashFrames);
         setHashForS3(hashFrames);
         console.log(stateText.contractHash3);
-        setEventString(stateText.contractHash3);
+        setEventString(stautsString + stateText.contractHash3);
         let data = {
           hash: hashFrames,
           event: 'hash3',
@@ -268,7 +249,7 @@ function App() {
       })
       .then(() => {
         console.log(stateText.contractMatch);
-        setEventString(stateText.contractMatch);
+        setEventString(stautsString + stateText.contractMatch);
         let data = {
           event: 'match',
         };
@@ -276,14 +257,15 @@ function App() {
       })
       .then(() => {
         console.log(stateText.contractResult);
-        setEventString(stateText.contractResult);
+        setEventString(stautsString + stateText.contractResult);
         data = {
           event: 'result',
         };
         return callSmartContract(data);
       })
       .then(() => {
-        return RNFS.unlink(externalDir);
+        // return RNFS.unlink(externalDir);
+        console.log('success processing video');
       })
       .catch(error => {
         console.log('download file from s3 error', error);
@@ -299,7 +281,7 @@ function App() {
   };
 
   const startRecording = async () => {
-    if (cameraRef.current) {
+    if (frontCameraRef.current && rearCameraRef.current) {
       setEventString(await getDeviceInfo());
       MyLocationModule.getGPSInfo(gpsInfo => {
         // console.log("Received GPS info: ", gpsInfo);
@@ -312,15 +294,23 @@ function App() {
       });
       setStart(true);
       RNFS.mkdir(externalDir);
-      const data = await cameraRef.current.recordAsync();
-      console.log(data.uri);
-      uploadVideoToS3(data.uri)
-        .then(() => {
-          console.log('Successfully uploaded video');
-        })
-        .catch(err => {
-          console.log('Error while uploading video:', err);
-        });
+      setEventString('Rear Camera:');
+      await recordAndUploadVideo(rearCameraRef, 'rear');
+      setEventString('Front Camera:');
+      await recordAndUploadVideo(frontCameraRef, 'front');
+    }
+  };
+
+  const recordAndUploadVideo = async cameraRef => {
+    try {
+      console.log(cameraRef.current);
+      if (cameraRef.current) {
+        const data = await cameraRef.current.recordAsync();
+        await uploadVideoToS3(data.uri);
+        console.log('Successfully uploaded video');
+      }
+    } catch (err) {
+      console.log('Error:', err);
     }
   };
 
@@ -354,13 +344,14 @@ function App() {
   const toggleSwitch = () => setIsEnabled(previousState => !previousState);
 
   const stopRecording = async () => {
-    if (cameraRef.current) {
+    if (frontCameraRef.current && rearCameraRef.current) {
       stopGeneratingHashes();
       setStartFlag(false);
       setIsRecording(false);
       console.log(stateText.end + new Date());
       setEventString(stateText.end + new Date());
-      await cameraRef.current.stopRecording();
+      await frontCameraRef.current.stopRecording();
+      await rearCameraRef.current.stopRecording();
     }
   };
 
@@ -373,6 +364,7 @@ function App() {
   };
 
   const uploadVideoToS3 = fileUri => {
+    console.log('file uri', fileUri);
     let content;
     const myUuid = uuidv4();
     return new Promise((resolve, reject) => {
@@ -427,9 +419,9 @@ function App() {
         })
         .then(result => {
           console.log('result', result);
-          setS3KeyName(myUuid);
-          setStartDown(true);
-          resolve();
+          downloadFileFromS3(BUCKET_NAME, myUuid)
+            .then(() => resolve())
+            .catch(err => reject(err));
         })
         .catch(error => {
           console.error('error', error);
@@ -529,7 +521,6 @@ function App() {
         .then(files => {
           return Promise.all(
             files.map(file => {
-              console.log(file.path);
               RNFS.readFile(file.path, 'base64');
             }),
           );
@@ -717,9 +708,9 @@ function App() {
     let text = '';
     eventArray.forEach(info => {
       text += `\n ${info}`;
-    })
+    });
     Clipboard.setString(text);
-  }
+  };
 
   return (
     <View style={styles.container}>
@@ -754,7 +745,28 @@ function App() {
           </ScrollView>
         </View>
       ) : (
-        <RNCamera ref={cameraRef} style={styles.preview} type={cameraType} />
+        <>
+          {isEnabled ? (
+            <>
+              <RNCamera
+                ref={frontCameraRef}
+                style={styles.preview}
+                type={RNCamera.Constants.Type.front}
+              />
+              <RNCamera
+                ref={rearCameraRef}
+                style={styles.preview}
+                type={RNCamera.Constants.Type.back}
+              />
+            </>
+          ) : (
+            <RNCamera
+              ref={cameraRef}
+              style={styles.preview}
+              type={cameraType}
+            />
+          )}
+        </>
       )}
       {localStream.current && (
         <RTCView streamURL={localStream.current.toURL()} />
@@ -764,9 +776,7 @@ function App() {
           <Text style={styles.liveText}>LIVE</Text>
         </View>
       )}
-      {toggleBoard ? (
-        <></>
-      ) : (
+      {!toggleBoard && (
         <View style={{flex: 0, flexDirection: 'row', justifyContent: 'center'}}>
           <Switch
             trackColor={{false: '#767577', true: '#81b0ff'}}
@@ -784,9 +794,7 @@ function App() {
             <Button
               title={toggleBoard ? 'Hide Board' : 'Show Board'}
               onPress={showBoard}></Button>
-            <Button
-              title='Copy'
-              onPress={copyText}></Button>
+            <Button title="Copy" onPress={copyText}></Button>
           </>
         ) : (
           <>
@@ -796,13 +804,17 @@ function App() {
                 onPress={isRecording ? stopRecording : startRecording}
               />
             ) : (
-              <Button title="Take Picture" onPress={takePicture} />
+              <>
+                <Button title="Take Picture" onPress={takePicture} />
+                <Button
+                  title={
+                    cameraType == RNCamera.Constants.Type.back
+                      ? 'Front'
+                      : 'Rear'
+                  }
+                  onPress={toggleCameraSetting}></Button>
+              </>
             )}
-            <Button
-              title={
-                cameraType == RNCamera.Constants.Type.back ? 'Front' : 'Rear'
-              }
-              onPress={toggleCameraSetting}></Button>
             <Button
               title={toggleBoard ? 'Hide Board' : 'Show Board'}
               onPress={showBoard}></Button>
