@@ -69,7 +69,8 @@ function App() {
   const [startDown, setStartDown] = useState(false);
   const [processText, setProcessText] = useState('');
   const [processVisible, setProcessVisible] = useState(false);
-  const [intervalId, setIntervalId] = useState(null);
+  const [intervalFrontId, setIntervalFrontId] = useState(null);
+  const [intervalRearId, setIntervalRearId] = useState(null);
   const [hashValues, setHashValues] = useState([]);
   const [eventArray, setEventArray] = useState([]);
   const [eventString, setEventString] = useState('');
@@ -195,17 +196,27 @@ function App() {
   };
 
   const startGeneratingHashes = () => {
-    clearInterval(intervalId); // Clear any previous intervals
-    let dataString = [];
-    const id = setInterval(() => {
+    clearInterval(intervalFrontId); // Clear any previous intervals
+    let frontDataString = [];
+    let rearDataString = [];
+    const front = setInterval(() => {
       const hash = CryptoJS.SHA256(Math.random().toString()).toString();
-      console.log(`frame ${dataString.length + 1}: ` + hash);
-      setEventString(`frame ${dataString.length + 1}: ` + hash);
+      console.log(`frame ${frontDataString.length + 1}: ` + hash);
+      setEventString(`front_frame ${frontDataString.length + 1}: ` + hash);
       setHashValues(prevHashValues => [...prevHashValues, hash]);
-      dataString.push(hash);
+      frontDataString.push(hash);
       // console.log(hash);
     }, 30);
-    setIntervalId(id);
+    const rear = setInterval(() => {
+      const hash = CryptoJS.SHA256(Math.random().toString()).toString();
+      console.log(`frame ${rearDataString.length + 1}: ` + hash);
+      setEventString(`rear_frame ${rearDataString.length + 1}: ` + hash);
+      setHashValues(prevHashValues => [...prevHashValues, hash]);
+      rearDataString.push(hash);
+      // console.log(hash);
+    }, 40);
+    setIntervalFrontId(front);
+    setIntervalRearId(rear);
   };
   const callback = gpsInfo => {
     // Handle the GPS information received from the native module
@@ -213,8 +224,10 @@ function App() {
   };
 
   const stopGeneratingHashes = () => {
-    clearInterval(intervalId);
-    setIntervalId(null);
+    clearInterval(intervalFrontId);
+    clearInterval(intervalRearId);
+    setIntervalFrontId(null);
+    setIntervalRearId(null);
   };
 
   const downloadFileFromS3 = (bucket_name, keyName) => {
